@@ -1,0 +1,10 @@
+*.log
+*.hlt
+
+
+.idea/*
+*/__pycache__*
+
+*.hlt
+*.log
+
