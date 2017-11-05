@@ -1,9 +1,10 @@
 import hlt
 import numpy as np
 import logging
+import pickle
 
 class MapManager():
-    def __init__(self, game, spacing=2, detailed_spacing=.25):
+    def __init__(self, game, grid_spacing=.25):
         """
         :param hlt.networking.Game game:
         :param float spacing:
@@ -14,182 +15,146 @@ class MapManager():
         self.w = self.map.width
         self.h = self.map.height
 
-        # x_partitions = int(self.w/spacing)
-        # y_partitions = int(self.h/spacing)
-        #
-        # self.dxs = np.linspace(0, self.w, x_partitions)
-        # self.dys = np.linspace(0, self.h, y_partitions)
-        #
-        # self.dx = self.dxs[1]
-        # self.dy = self.dys[1]
+        self.scale = grid_spacing
 
-        self.binary_scale = detailed_spacing
+        self.open_spots = np.zeros((int(self.w / self.scale) + 10, int(self.h / self.scale) + 10))
+        self.open_moves = np.zeros((int(self.w / self.scale) + 10, int(self.h / self.scale) + 10))
 
         self.update()
 
     def update(self):
         self.map = self.game.map
 
-        self.reset_binary_img()
-        # self.reset_planet_heatmap()
-        # self.reset_ship_heatmap()
+        self.reset_binary_maps()
+
+    def quick_collision_check(self, from_loc, to_loc):
+        x1, y1 = from_loc
+        x2, y2 = to_loc
+
+        x1, x2 = sorted((x1, x2))
+        y1, y2 = sorted((y1, y2))
+
+        pts = np.mgrid[int(x1-1):int(x2+1), int(y1-1):int(y2+1)].transpose(1,2,0)
+        rect = self.pt_in_rect(from_loc, to_loc, 0, pts)
+
+        mask = tuple(map(tuple, pts[rect].T))
+        return np.any(self.open_spots[mask] != 0)
 
     def check_collision(self, ship):
         """
         :param hlt.entity.MovedShip ship: We check whether this ship collides with anything on its path.
         :return bool: Whether we collide or not.
         """
-        xs, ys = self.obj2locs(ship)
-        return np.any(self.binary_map[xs, ys] != 0)
+
+
+        pts = self.obj2locs(ship)
+        pt_tup = tuple(map(tuple, pts.T))
+
+        return np.any(self.open_spots[pt_tup] != 0)
 
         # cx, cy = ship.x / self.binary_scale, ship.y / self.binary_scale
         # return self.binary_map[int(cx), int(cy)] != 0
 
     def add_ship(self, ship):
-        self.draw_onto_binary_img(ship)
-        # self.place_on_map(ship, self.map_ships)
+        self.mark_occupied_spots(ship)
+        self.mark_invalid_moves(ship)
 
-    def draw_onto_binary_img(self, obj, buffer=None):
-        locx, locy = self.obj2locs(obj, buffer)
+    def mark_occupied_spots(self, obj):
+        pts = self.obj2locs(obj)
 
-        self.binary_map[locx, locy] = 1
+        pt_tup = tuple(map(tuple, pts.T))
+        self.open_spots[pt_tup] = 1
 
-    def pt_in_circ(self, cx, cy, r, xx, yy, fudge=np.sqrt(2)):
-        dd_sq = (xx-cx)**2 + (yy-cy)**2
-        return dd_sq < (r + fudge)**2
+    def mark_invalid_moves(self, obj):
+        pts = self.obj2locs(obj, buffer=hlt.constants.SHIP_RADIUS)
 
-    def pt_in_rect(self, x1, y1, x2, y2, r, xx, yy):
-        p1 = np.array([x1, y1])
-        p2 = np.array([x2, y2])
+        pt_tup = tuple(map(tuple, pts.T))
+        self.open_moves[pt_tup] = 1
 
-        perp = np.array([-(y2-y1), (x2-x1)])
+    def pt_in_circ(self, center, r, pts):
+        orthog_dists = np.abs(pts - center)
 
-        if np.dot(perp, perp) == 0:
-            return np.zeros_like(xx, dtype=bool)
+        l1 = np.abs(np.dot(orthog_dists, [1, -1]))
+        l2 = np.sqrt(2) * (np.amin(orthog_dists, axis=-1) - 1 / 2)  # box width is 1.
 
-        perp = r * perp / np.sqrt(np.dot(perp, perp))
+        l3 = np.sqrt(l1 ** 2 + l2 * l2 + np.sqrt(2) * l1 * l2)  # Application of law of cosines
+        l3[l2 < 0] = np.amax(orthog_dists, axis=-1)[l2 < 0] - 1 / 2
 
-        pts = np.stack([xx, yy], axis=2)
+        # l3 is circle squared radius to contact a square centered at <pts> with width 1.
+        return l3 <= r
 
-        ra = p1+perp
-        # rb = p1-perp
-        # rd = p2+perp
+    def pt_in_rect(self, box1, box2, r, pts):
+        perp = np.dot([[0,-1],[1,0]], box2 - box1)
+        perp = perp / np.sqrt(np.dot(perp, perp)) #normalize perp to mag 1
 
-        #https://math.stackexchange.com/questions/190111/how-to-check-if-a-point-is-inside-a-rectangle
-        AM_AB = np.dot(pts - ra, -2*perp)
-        AM_AD = np.dot(pts - ra, p2 - p1)
+        proj_axis = np.dot(pts - box1, box2-box1)
+        in_bounds = (0 < proj_axis) & (proj_axis < np.dot(box2 - box1, box2-box1))
 
-        ABAB = 4*r*r
-        ADAD = np.dot(p2 - p1, p2 - p1)
+        line_dists = np.abs(np.dot(pts - box1, perp))
 
-        return (0 < AM_AB) & (AM_AB < ABAB) & (0 < AM_AD) & (AM_AD < ADAD)
+        # A = np.stack((box2-box1, perp), axis=1)
+        # Ainv = np.linalg.inv(A)
+        #
+        # proj_trans = np.dot(np.dot(A, [[0, 0], [0, 1]]), Ainv)
+        # perp_projs = np.dot(shifted_pts, proj_trans)
 
-    # def obj2locs(self, obj, buffer=2*hlt.constants.SHIP_RADIUS):
+        perp_q1_dir = np.abs(perp)
+
+        box_loss = np.dot(perp_q1_dir, [1/2,1/2]) #box width is 1.
+
+        min_rect_widths = line_dists - box_loss
+
+        return (min_rect_widths <= r) & in_bounds
+
     def obj2locs(self, obj, buffer=None):
         if buffer is None:
-            buffer = .5
+            buffer = 0
 
-        r = (obj.radius + buffer) / self.binary_scale
-        cx, cy = obj.x / self.binary_scale, obj.y / self.binary_scale
+        lx, ux, ly, uy = obj.bounding_box(buffer+1)
 
-        xx, yy = np.mgrid[int(cx-r-2):int(cx+r+2), int(cy-r-2):int(cy+r+2)]
+        px_lx = int(lx/self.scale)
+        px_ly = int(ly/self.scale)
+        px_ux = int(ux/self.scale)
+        px_uy = int(uy/self.scale)
 
-        circ = self.pt_in_circ(cx, cy, r, xx, yy)
-        tot = circ
+        maxx, maxy = self.open_spots.shape
+        xrange = slice(max(px_lx, 0), min(px_ux, maxx))
+        yrange = slice(max(px_ly, 0), min(px_uy, maxy))
+
+        xx, yy = np.mgrid[xrange, yrange]
+        pts = np.stack([xx, yy], axis=2)
+
+        r = (obj.radius + buffer) / self.scale
+        c1 = np.array([obj.x, obj.y], dtype=float) / self.scale
+        tot = self.pt_in_circ(c1, r, pts)
 
         if isinstance(obj, hlt.entity.MovedShip):
-            cx2, cy2 = obj.prev_loc.x / self.binary_scale, obj.prev_loc.y / self.binary_scale
-            c2 = self.pt_in_circ(cx, cy, r, xx, yy)
+            c2 = np.array([obj.prev_loc.x, obj.prev_loc.y], dtype=float) / self.scale
 
-            body_box = self.pt_in_rect(cx2, cy2, cx, cy, r, xx, yy)
+            circ2 = self.pt_in_circ(c2, r, pts)
 
-            tot |= c2
+            body_box = self.pt_in_rect(c2, c1, r, pts)
+
+            tot |= circ2
             tot |= body_box
-            pass
 
-        return xx[tot], yy[tot]
+        return pts[tot]
 
-    def reset_binary_img(self):
-        self.binary_map = np.zeros( (int(self.w / self.binary_scale)+10, int(self.h / self.binary_scale)+10) )
+    def reset_binary_maps(self):
+        self.open_spots = np.zeros((int(self.w / self.scale) + 10, int(self.h / self.scale) + 10))
+        self.open_moves = np.zeros((int(self.w / self.scale) + 10, int(self.h / self.scale) + 10))
+
         for planet in self.map.all_planets():
-            self.draw_onto_binary_img(planet, buffer=2)
+            self.mark_occupied_spots(planet)
+            self.mark_occupied_spots(planet)
 
         for player in self.map.all_players():
             if player.id == self.map.my_id:
                 for ship in player.all_ships():
+                    self.mark_invalid_moves(ship)
                     if ship.docking_status != ship.DockingStatus.UNDOCKED:
-                        self.draw_onto_binary_img(ship)
+                        self.add_ship(ship)
                 continue
             for ship in player.all_ships():
-                self.draw_onto_binary_img(ship)
+                self.add_ship(ship)
 
-
-    # def in_map(self, ix, iy):
-    #     assert isinstance(ix, int)
-    #     assert isinstance(iy, int)
-    #     if ix<0 or iy<0:
-    #         return False
-    #     if ix>=self.dxs.size or iy>=self.dys.size:
-    #         return False
-    #     return True
-    #
-    # def obj_on_point(self, obj, loc):
-    #     ix, iy = loc
-    #     x, y = self.dxs[ix], self.dys[iy]
-    #
-    #     dx = abs(obj.x - x)
-    #     dy = abs(obj.y - y)
-    #
-    #     if dx > self.dx/2 + obj.radius: return False
-    #     if dy > self.dy/2 + obj.radius: return False
-    #
-    #     if dx <= self.dx/2: return True
-    #     if dy <= self.dy/2: return True
-    #
-    #     sq_corner_dist = (dx-x/2)**2 + (dy-y/2)**2
-    #     return sq_corner_dist <= obj.radius**2
-    #
-    # def get_neighboring_bins(self, loc, prev_locs):
-    #     ix, iy = loc
-    #     new_locs = []
-    #     for dx, dy in [(-1,0), (0,1), (0,-1), (1,0)]:
-    #         nx, ny = ix+dx, iy+dy
-    #         if (nx, ny) in prev_locs:
-    #             continue
-    #         if self.in_map(nx, ny):
-    #             prev_locs.add((nx, ny))
-    #             new_locs.append((nx, ny))
-    #     return new_locs
-    #
-    # def get_grid_intersections(self, obj):
-    #     ix = int(obj.x/self.dx - .5)
-    #     iy = int(obj.y/self.dy - .5)
-    #
-    #     locs = [(ix, iy)]
-    #     checked_locs = {(ix, iy)}
-    #     while locs:
-    #         cur_loc = locs.pop(0)
-    #         if self.obj_on_point(obj, cur_loc):
-    #             yield cur_loc
-    #             locs += self.get_neighboring_bins(cur_loc, checked_locs)
-    #
-    # def place_on_map(self, obj, img):
-    #     for loc in self.get_grid_intersections(obj):
-    #         img[loc].add(obj)
-    #
-    # def reset_planet_heatmap(self):
-    #     self.map_planets = np.array( [[set([]) for i in range(self.dxs.size)] for j in range(self.dys.size)] )
-    #     for planet in self.map.all_planets():
-    #         self.place_on_map(planet, self.map_planets)
-    #
-    # def reset_ship_heatmap(self):
-    #     self.map_ships = np.array( [[set([]) for i in range(self.dxs.size)] for j in range(self.dys.size)] )
-    #     for player in self.map.all_players():
-    #         if player.id == self.map.my_id:
-    #             for ship in player.all_ships():
-    #                 if ship.docking_status != ship.DockingStatus.UNDOCKED:
-    #                     logging.info('uhh does this even work?')
-    #                     self.add_ship(ship)
-    #             continue
-    #         for ship in player.all_ships():
-    #             self.add_ship(ship)

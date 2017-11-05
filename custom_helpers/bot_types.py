@@ -15,31 +15,22 @@ class Docking(BotSquad):
         """
         :param mp_helper map_helper:
         """
-        acted = set([])
+        dists = []
+
         for ship_id in self.bot_list:
             ship = self.game.map.get_me().get_ship(ship_id)
-            if ship.docking_status == ship.DockingStatus.UNDOCKED:
-                if ship.can_dock(self.targ):
-                    command_queue.append(ship.dock(self.targ))
-                else:
-                    continue
+            dists.append((ship.dist_to(self.targ), ship_id))
 
-            map_helper.add_ship(ship)
-            acted.add(ship_id)
-
-        for ship_id in self.bot_list:
-            if ship_id in acted:
+        for d, ship_id in sorted(dists):
+            ship = self.game.map.get_me().get_ship(ship_id)
+            if ship.docking_status != ship.DockingStatus.UNDOCKED:
+                map_helper.add_ship(ship)
                 continue
-            ship = self.game.map.get_me().get_ship(ship_id)
+            if ship.can_dock(self.targ):
+                command_queue.append(ship.dock(self.targ))
+                map_helper.add_ship(ship)
+                continue
 
-            # navigate_command = ship.navigate_calc(ship.closest_point_to(self.targ),
-            #                                       self.game.map, hlt.constants.MAX_SPEED)
-            #
-            # if navigate_command is None:
-            #     map_helper.add_ship(ship)
-            #     continue
-            #
-            # speed, angle = navigate_command
             speed, angle = helper.move(map_helper, ship_id,
                                        ship.closest_point_to(self.targ))
 

@@ -80,7 +80,7 @@ class BotManager():
         self.player = player
         self.all_ships = {}  # Dictionary of all ship ids and which group they're in.
 
-        self.map_helper = map_helper(game, spacing=2)
+        self.map_helper = map_helper(game)
 
         self.squads = {-1: BotSquad(game, self.eject)}  #Dictionary of group names and the associated group
 
@@ -135,9 +135,10 @@ class BotManager():
     def queue_commands(self, command_queue):
         t = time.time()
 
-        ordering = sorted([(squad.prio, name) for name, squad in self.squads.items()])
+        ordering = sorted([(squad.prio, squad.num_members(), name) for name, squad in self.squads.items()],
+                          key=lambda x: (x[0], -x[1]))
 
-        for _, name in ordering:
+        for _, _, name in ordering:
             squad = self.squads[name]
             squad.act(command_queue, self.map_helper)
 

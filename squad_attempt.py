@@ -3,6 +3,7 @@ import logging
 import hlt
 from custom_helpers import bot_types
 from custom_helpers.bot_manager import BotManager
+import pickle
 
 game = hlt.Game("Goonsquad")
 # Then we print our start message to the logs

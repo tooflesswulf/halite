@@ -38,7 +38,7 @@ class Entity:
         """
         return math.sqrt((target.x - self.x) ** 2 + (target.y - self.y) ** 2)
 
-    def calculate_angle_between(self, target):
+    def angle_to(self, target):
         """
         Calculates the angle between this object and the target in degrees.
 
@@ -61,12 +61,20 @@ class Entity:
         :return: The closest point's coordinates
         :rtype: Position
         """
-        angle = target.calculate_angle_between(self)
+        angle = target.angle_to(self)
         radius = target.radius + min_distance
         x = target.x + radius * math.cos(math.radians(angle))
         y = target.y + radius * math.sin(math.radians(angle))
 
         return Position(x, y)
+
+    def bounding_box(self, buffer=0):
+        lx = self.x - (self.radius+buffer)
+        ux = self.x + (self.radius+buffer)
+        ly = self.y - (self.radius+buffer)
+        uy = self.y + (self.radius+buffer)
+        return lx, ux, ly, uy
+
 
     @abc.abstractmethod
     def _link(self, players, planets):
@@ -312,7 +320,7 @@ class Ship(Entity):
         if max_corrections <= 0:
             return None
         distance = self.dist_to(target)
-        angle = self.calculate_angle_between(target)
+        angle = self.angle_to(target)
 
         ignore = () if not (ignore_ships or ignore_planets) \
             else Ship if (ignore_ships and not ignore_planets) \
@@ -426,12 +434,20 @@ class MovedShip(Entity):
         magnitude = int(round(mag))
         theta = int(round(angle))
 
-        dx = magnitude*math.cos(theta * 180/math.pi)
-        dy = magnitude*(math.sin(theta * 180/math.pi))
+        dx = magnitude * math.cos(theta * math.pi/180)
+        dy = magnitude * math.sin(theta * math.pi/180)
 
         self.prev_loc = ship
 
         super().__init__(ship.x+dx, ship.y+dy, constants.SHIP_RADIUS, None, None, None)
+
+    def bounding_box(self, buffer=0):
+        lx1, ux1, ly1, uy1 = super().bounding_box(buffer)
+        lx2, ux2, ly2, uy2 = self.prev_loc.bounding_box(buffer)
+
+        lx, ux, ly, uy = min(lx1, lx2), max(ux1, ux2), min(ly1, ly2), max(uy1, uy2)
+
+        return lx, ux, ly, uy
 
     def _link(self, players, planets):
         raise NotImplementedError("MovedShip should not have link attributes.")
