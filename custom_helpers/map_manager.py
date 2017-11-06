@@ -146,7 +146,7 @@ class MapManager():
 
         for planet in self.map.all_planets():
             self.mark_occupied_spots(planet)
-            self.mark_occupied_spots(planet)
+            self.mark_invalid_moves(planet)
 
         for player in self.map.all_players():
             if player.id == self.map.my_id:

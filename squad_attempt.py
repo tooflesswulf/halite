@@ -75,5 +75,8 @@ while True:
 
     # logging.info('Commands: {}'.format(command_queue))
 
+    # if i>50:
+    #     pickle.dump(my_manager.map_helper, open('map_utils.pkl','wb'))
+
     game.send_command_queue(command_queue)
 
