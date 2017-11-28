@@ -12,14 +12,18 @@ logging.info("Start")
 my_manager = BotManager(game.map.get_me(), game)
 
 
-def closest_planets(entity):
+def planet_weights(entity):
     planet_ids = []
-    dists = []
+    weights = []
     for planet in game.map.all_planets():
-        dists.append(planet.dist_to(entity))
         planet_ids.append(planet.id)
+        if planet.owner is None:
+            weights.append(.6 * planet.dist_to(entity))
+            continue
+        weights.append(planet.dist_to(entity))
 
-    s_dists, s_ids = zip(*sorted(zip(dists, planet_ids)))
+
+    s_dists, s_ids = zip(*sorted(zip(weights, planet_ids)))
     return zip(s_ids, s_dists)
 
 def is_free_targ(planet):
@@ -42,7 +46,7 @@ while True:
 
     for bot_id in my_manager.squads[-1].bot_list.copy():
         bot = game_map.get_me().get_ship(bot_id)
-        for planet_id, dist in closest_planets(bot):
+        for planet_id, dist in planet_weights(bot):
             planet = game_map.get_planet(planet_id)
 
             if is_free_targ(planet):

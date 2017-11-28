@@ -4,6 +4,7 @@ import math
 from enum import Enum
 from . import constants
 
+import numpy as np
 
 class Entity:
     """
@@ -20,9 +21,10 @@ class Entity:
     """
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, x, y, radius, health, player, entity_id):
+    def __init__(self, x, y, radius, health=None, player=None, entity_id=None):
         self.x = x
         self.y = y
+        self.loc = np.array([x, y])
         self.radius = radius
         self.health = health
         self.owner = player
@@ -36,7 +38,7 @@ class Entity:
         :return: distance
         :rtype: float
         """
-        return math.sqrt((target.x - self.x) ** 2 + (target.y - self.y) ** 2)
+        return math.sqrt(np.sum((self.loc-target.loc)**2))
 
     def angle_to(self, target):
         """
@@ -106,15 +108,10 @@ class Planet(Entity):
 
     def __init__(self, planet_id, x, y, hp, radius, docking_spots, current,
                  remaining, owned, owner, docked_ships):
-        self.id = planet_id
-        self.x = x
-        self.y = y
-        self.radius = radius
+        super().__init__(x, y, radius, health=hp, player=owner, entity_id=planet_id)
         self.num_docking_spots = docking_spots
         self.current_production = current
         self.remaining_resources = remaining
-        self.health = hp
-        self.owner = owner if bool(int(owned)) else None
         self._docked_ship_ids = docked_ships
         self._docked_ships = {}
 
@@ -236,12 +233,8 @@ class Ship(Entity):
 
     def __init__(self, player_id, ship_id, x, y, hp, vel_x, vel_y,
                  docking_status, planet, progress, cooldown):
-        self.id = ship_id
-        self.x = x
-        self.y = y
-        self.owner = player_id
-        self.radius = constants.SHIP_RADIUS
-        self.health = hp
+        super().__init__(x, y, constants.SHIP_RADIUS, health=hp, player=player_id, entity_id=ship_id)
+
         self.docking_status = docking_status
         self.planet = planet if (docking_status is not Ship.DockingStatus.UNDOCKED) else None
         self._docking_progress = progress

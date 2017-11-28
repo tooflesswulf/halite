@@ -26,13 +26,14 @@ class Docking(BotSquad):
             if ship.docking_status != ship.DockingStatus.UNDOCKED:
                 map_helper.add_ship(ship)
                 continue
-            if ship.can_dock(self.targ):
+
+            if ship.dist_to(self.targ) - self.targ.radius <= 2:
                 command_queue.append(ship.dock(self.targ))
                 map_helper.add_ship(ship)
                 continue
 
             speed, angle = helper.move(map_helper, ship_id,
-                                       ship.closest_point_to(self.targ))
+                                       ship.closest_point_to(self.targ, min_distance=.75))
 
             map_helper.add_ship(hlt.entity.MovedShip(ship, speed, angle))
             command_queue.append(ship.thrust(speed, angle))
@@ -137,8 +138,15 @@ class PlanetAtk(BotSquad):
             else:
                 targ_spot = self.targ
 
+        dists = []
         for ship_id in self.bot_list:
             ship = self.game.map.get_me().get_ship(ship_id)
+            dists.append((ship.dist_to(targ_spot), ship_id))
+
+        for i, (dist, ship_id) in enumerate(sorted(dists)):
+            ship = self.game.map.get_me().get_ship(ship_id)
+            if i>10:
+                break
 
             speed, angle = helper.move(map_helper, ship_id,
                                        ship.closest_point_to(targ_spot))
